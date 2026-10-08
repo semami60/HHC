@@ -1,0 +1,116 @@
+/*********************************************
+ * OPL 12.9.0.0 Model
+ * Author: Mahdi
+ * Creation Date: 3 شهر?ور 1403 ه‍.ش. at 23:35:44
+ *********************************************/
+execute{	
+cp.param.timelimit=3600;
+}
+
+using CP;
+							// Parameters \\
+							
+int N = ...; //nb of patients 
+int L = ...;  // nb of labs
+int O = ...;  // nb of operations (services)
+int On = ...; // nb of normal operations (services)
+{int} O_s = asSet(On+1..O);   // set of special operations
+
+int K = ...;	// nb of tolat caregivers
+int Ks = ...;	// nb of special ceregivers
+int Kn = ...;  // nb of normal ceregivers
+int U = ...;  // Length of a regular working time in a shift excluding overtime
+int Up = ...;  // Length of the maximum allowable working time in a shift, including overtime
+int Tp = ...;  // Maximum allowable time for delivering a perishable sample
+int Dem_matrix[1..N][1..O] = ...;  // Demand matrix with a value of 1 if patient i requests service o; 0 otherwise
+int Tl[1..N][1..L] = ... ;  // Travel time between patient i and laboratory jp
+
+tuple triplet {int id1; int id2; int value;}; 
+{triplet}MM = ...;  // Distribution matrix contains the travel time between the nodes (including the service center and patients)
+
+tuple Operation{int careG_k; int node_i ; int dem; float cost; int pt; };
+{Operation} Ops =... ;  // Includes all possible states and quantities of caregivers and patients, their corresponding service demands, service costs and service time
+
+tuple Visit{int careG; int node;};
+{Visit} Vis = ...;  // Includes all possible caregiver-to-patient assignment patterns
+
+tuple Nodeee{ int nd; int str; int fin;};
+{Nodeee} Nod = ... ;  // Includes all patients and their TWs (allowed start and end times)
+
+							// Decision Variables \\
+
+dvar interval nod[i in Nod] in i.str..i.fin ; // Interval variable representing different possible states of parameter Nod including patient i, the start and end time of the patient’s TW 
+
+dvar interval ops[o in Ops] optional size o.pt ;  // Optional interval variable representing different possible states of the parameter Ops, including the start time, processing time, end time, and service cost of the corresponding operation. Only one interval can be selected for each service requested by each patient
+
+dvar interval vis[ v in Vis] optional;  // Optional interval variable representing different possible states of parameter Vis. Only one interval can be selected for each patient    
+ 
+dvar interval tr[i in 1..N][jp in 1..L] optional size Tl[i][jp] ;  // Optional interval variable representing the travel time between patient i and laboratory jp
+
+dvar sequence route[k in 1..K] in all(v in Vis: v.careG == k) vis[v] types all(v in Vis, i in 0..N+1: v.node == i && v.careG == k) i ;  // Sequence variable representing the order of the interval variables ops assigned to caregiver k
+
+dvar boolean h[jp in 1..L];  // 1 if laboratory jp is selected; 0 otherwise
+
+							// Expressions & Objective Functions \\
+
+dexpr float ms = max(k in 1..K) endOf(vis[<k,N+1>]); // Makespan
+
+dexpr float oW = sum(k in 1..K) maxl(0, endOf(vis[<k,N+1>]) - U ) ; //OverWork
+
+dexpr float z1 = ms + oW + sum( i in 1..N, jp in 1..L)endOf(tr[i][jp]) + sum( i in 1..N, jp in 1..L) h[jp] * Tl[i][jp] ;  
+
+dexpr float z2 = sum(n in Nod, v in Vis:v.node == n.nd , o in Ops: o.node_i == n.nd && o.careG_k == v.careG) presenceOf(ops[o])*o.cost*o.pt;
+
+							// Model \\
+
+minimize z1;
+
+subject to {
+
+	z2 >= ...;
+
+	forall(k in 1..K) {		
+		noOverlap(route[k],MM,true); 
+		presenceOf(vis[<k,0>]);
+		presenceOf(vis[<k,N+1>]);
+		first(route[k], vis[<k,0>]);
+		last(route[k], vis[<k,N+1>]); }
+	
+	forall(n in Nod)
+	  alternative(nod[n], all(v in Vis: v.node == n.nd) vis[v]);
+                                           	  
+	forall( i in 1..N, v in Vis: v.node == i) 
+  	  span(vis[v] , all(o in Ops: o.node_i == v.node && o.careG_k == v.careG ) ops[o] ); 	
+  	  	      	
+  	forall(o1 in Ops, o2 in Ops: o1.careG_k == o2.careG_k && o1.node_i == o2.node_i && o1.dem < o2.dem )  
+  	  endBeforeStart(ops[o1], ops[o2]);   	 
+
+	forall(i in 1..N, k in 1..K, o1 in Ops, o2 in Ops: o1.careG_k == k && o2.careG_k == k && o1.node_i == i && o2.node_i == i && o1.dem < o2.dem)  
+	  presenceOf(ops[o1])*o1.careG_k == presenceOf(ops[o2])*o2.careG_k;
+  
+	forall(i in 1..N, d in O_s)   
+	  sum(v in Vis: v.node == i && v.careG > Ks) presenceOf(vis[v]) <= 10*(1 - Dem_matrix[i][d] );    
+		
+	forall(k in 1..K)
+	  maxl(0, endOf(vis[<k,N+1>]) - U ) <= Up;
+	  	
+	forall(i in 1..N, o in Ops: o.node_i == i  && o.dem == 1 )              
+		sum(jp in 1..L)presenceOf(tr[i][jp]) >=  presenceOf(ops[o]);
+
+	forall(i in 1..N, jp in 1..L)
+	  presenceOf(tr[i][jp]) <= h[jp];
+	
+	forall(i in 1..N, jp in 1..L)
+	  endOf(tr[i][jp]) <= Tp;
+	
+	sum(jp in 1..L)h[jp] >= 1;     
+		
+}	
+
+execute{	
+writeln( "Gap:", cp.getObjGap());
+}
+
+
+
+ 
